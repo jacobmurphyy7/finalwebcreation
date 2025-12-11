@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jacob Murphy Scratch</title>
+    <link rel="stylesheet" href="css/mystyles.css">
+</head>
+
+<body id="top">
+     <nav>
+        <ul>
+            <li><a href="index.html">Home</a></li>
+            <li><a href="resume.html">Resume</a></li>
+            <li><a href="hobbies.html">Hobbies</a></li>
+            <li><a href="game.html">Game</a></li>
+        </ul>
+    </nav>
+    <div class="container">
+        <div class="header">
+            <h1>Can you win in this F1 Style Strategy Game??</h1>
+        </div>
+
+        <div class="content">
+            <p class="subtitle">Take control of pit strategy, tyre choices, and race pace — try to outsmart the AI!</p>
+        </div>
+    </div>
+<!--!!!!!!!!!!!!!!!!!!!!!MY AI GENERATED GAME IS HERE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pitwall Commander F1 - 2D</title>
+    
+    <!-- React & ReactDOM (Minified) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        #root { max-width: 1400px; max-height: 700px; margin: 20px auto; border: 2px solid #334155; border-radius: 8px; }
+        body { margin: 0; padding: 0; background-color: #0f172a; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        canvas { display: block; }
+        .tire-soft { color: #ef4444; border-color: #ef4444; }
+        .tire-medium { color: #eab308; border-color: #eab308; }
+        .tire-hard { color: #f9fafb; border-color: #f9fafb; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- Game Constants & Data ---
+
+        const FPS = 60;
+        const LAP_COUNT = 10; 
+        const FUEL_CAPACITY = 100;
+        const PIT_STOP_DURATION = 3000; // ms
+
+        const TIRES = {
+            soft: { name: "Soft", color: "#ef4444", speedMod: 1.03, wearRate: 0.9, type: 'soft' },
+            medium: { name: "Medium", color: "#eab308", speedMod: 1.0, wearRate: 0.5, type: 'medium' },
+            hard: { name: "Hard", color: "#ffffff", speedMod: 0.97, wearRate: 0.2, type: 'hard' }
+        };
+
+        const MODES = {
+            push: { name: "Push", speedMod: 1.02, fuelBurn: 0.8, color: "text-red-500" }, 
+            normal: { name: "Balanced", speedMod: 1.0, fuelBurn: 0.5, color: "text-blue-400" },
+            save: { name: "Lift & Coast", speedMod: 0.96, fuelBurn: 0.2, color: "text-green-500" }
+        };
+
+        // Track Geometries
+        const TRACKS = [
+            {
+                id: 1, name: "Speed Ring", lengthKM: 4.5, difficulty: "Low",
+                points: [[10,10], [50,5], [90,10], [95,50], [90,90], [50,95], [10,90], [5,50]],
+                pitPoints: [[15, 20], [50, 15], [85, 20]] 
+            },
+            {
+                id: 2, name: "Serpent's Pass", lengthKM: 5.8, difficulty: "Medium",
+                points: [[10,10], [40,10], [60,30], [80,10], [90,20], [90,80], [70,90], [50,70], [30,90], [10,80], [10,50]],
+                pitPoints: [[15, 20], [25, 20], [35, 20]] 
+            },
+            {
+                id: 3, name: "Grand Circuit", lengthKM: 7.0, difficulty: "High",
+                points: [[10,80], [10,20], [30,10], [60,10], [90,30], [80,60], [90,90], [60,80], [40,90], [20,80]],
+                pitPoints: [[15, 70], [15, 50], [15, 30]] 
+            }
+        ];
+
+        const TEAMS = [
+            { name: "Player", color: "#3b82f6", isPlayer: true },
+            { name: "Red Bull", color: "#1e3a8a", isPlayer: false },
+            { name: "Ferrari", color: "#dc2626", isPlayer: false },
+            { name: "Mercedes", color: "#14b8a6", isPlayer: false },
+            { name: "McLaren", color: "#f97316", isPlayer: false },
+            { name: "Aston", color: "#047857", isPlayer: false },
+            { name: "Alpine", color: "#ec4899", isPlayer: false },
+            { name: "Williams", color: "#60a5fa", isPlayer: false }
+        ];
+
+        // --- Helper: Catmull-Rom Spline ---
+        function getSplinePoints(points, tension = 0.5, numOfSegments = 16, closed = true) {
+            let res = [];
+            const pts = closed ? [...points, points[0], points[1], points[2]] : [...points]; 
+            
+            let loopLimit = closed ? points.length : points.length - 3;
+            if (!closed && points.length < 4) return points; 
+
+            for (let i = 0; i < loopLimit; i++) {
+                const p0 = pts[i];
+                const p1 = pts[i+1];
+                const p2 = pts[i+2];
+                const p3 = pts[i+3];
+
+                for (let t = 0; t < numOfSegments; t++) {
+                    const st = t / numOfSegments;
+                    const st2 = st * st;
+                    const st3 = st2 * st;
+
+                    const x = 0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * st + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * st2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * st3);
+                    const y = 0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * st + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * st2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * st3);
+                    res.push({x, y});
+                }
+            }
+            return res;
+        }
+
+        // --- Components ---
+
+        const Icon = ({ name, size = 16, className }) => {
+            React.useEffect(() => {
+                lucide.createIcons();
+            }, [name]);
+            return <i data-lucide={name} width={size} height={size} className={className}></i>;
+        };
+
+        const MainMenu = ({ onStart }) => {
+            const [selectedTrack, setSelectedTrack] = useState(TRACKS[0]);
+            const [selectedTire, setSelectedTire] = useState('soft');
+
+            return (
+                <div className="flex flex-col items-center justify-center h-screen bg-slate-900 text-white p-8 animate-fade-in">
+                    <h1 className="text-6xl font-bold mb-2 italic tracking-tighter text-blue-500">PITWALL <span className="text-white">COMMANDER</span></h1>
+                    <p className="text-slate-400 mb-12">Formula 1 Strategy Simulation</p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-12 w-full max-w-4xl">
+                        <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-xl">
+                            <h2 className="text-2xl font-bold mb-4 flex items-center gap-2"><Icon name="map" /> Select Circuit</h2>
+                            <div className="space-y-3">
+                                {TRACKS.map(track => (
+                                    <button 
+                                        key={track.id}
+                                        onClick={() => setSelectedTrack(track)}
+                                        className={`w-full p-4 rounded-lg text-left transition-all ${selectedTrack.id === track.id ? 'bg-blue-600 border-l-4 border-white' : 'bg-slate-700 hover:bg-slate-600'}`}
+                                    >
+                                        <div className="font-bold text-lg">{track.name}</div>
+                                        <div className="text-xs text-slate-300 flex justify-between mt-1">
+                                            <span>{track.lengthKM}km</span>
+                                            <span>Diff: {track.difficulty}</span>
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-xl flex flex-col justify-between">
+                            <div>
+                                <h2 className="text-2xl font-bold mb-4 flex items-center gap-2"><Icon name="settings" /> Race Strategy</h2>
+                                <p className="text-slate-400 text-sm mb-6">Choose your starting compound.</p>
+                                
+                                <div className="grid grid-cols-3 gap-2">
+                                    {Object.entries(TIRES).map(([key, tire]) => (
+                                        <button
+                                            key={key}
+                                            onClick={() => setSelectedTire(key)}
+                                            className={`p-4 rounded-lg border-2 flex flex-col items-center gap-2 transition-all ${selectedTire === key ? 'bg-slate-700 scale-105' : 'bg-slate-900 border-slate-700 hover:bg-slate-800'} ${key === 'soft' ? 'border-red-500' : key === 'medium' ? 'border-yellow-500' : 'border-white'}`}
+                                            style={{borderColor: selectedTire === key ? tire.color : ''}}
+                                        >
+                                            <div className="w-8 h-8 rounded-full border-4" style={{borderColor: tire.color}}></div>
+                                            <span className="font-bold text-sm">{tire.name}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <button 
+                                onClick={() => onStart(selectedTrack, selectedTire)}
+                                className="w-full mt-8 bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-lg text-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
+                            >
+                                <Icon name="flag" /> START RACE
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const RaceResult = ({ cars, onRestart }) => {
+            const sortedCars = [...cars].sort((a, b) => b.lap - a.lap || b.progress - a.progress);
+
+            return (
+                <div className="fixed inset-0 z-50 bg-slate-900/95 flex items-center justify-center p-4">
+                    <div className="bg-slate-800 p-8 rounded-xl max-w-2xl w-full border border-slate-600 shadow-2xl animate-fade-in">
+                        <h1 className="text-4xl font-bold mb-6 text-center">Race Results</h1>
+                        
+                        <div className="bg-slate-900 rounded-lg overflow-hidden mb-8">
+                            <table className="w-full text-left">
+                                <thead className="bg-slate-700 text-slate-300">
+                                    <tr>
+                                        <th className="p-3">Pos</th>
+                                        <th className="p-3">Driver</th>
+                                        <th className="p-3">Tyre</th>
+                                        <th className="p-3 text-right">Stops</th>
+                                        <th className="p-3 text-right">Gap</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {sortedCars.map((car, idx) => (
+                                        <tr key={idx} className={`border-b border-slate-800 ${car.isPlayer ? 'bg-blue-900/20' : ''}`}>
+                                            <td className="p-3 font-mono">{idx + 1}</td>
+                                            <td className="p-3 font-bold" style={{color: car.color}}>{car.name}</td>
+                                            <td className="p-3">
+                                                <span className="w-3 h-3 inline-block rounded-full mr-2" style={{backgroundColor: TIRES[car.tireType].color}}></span>
+                                                {TIRES[car.tireType].name}
+                                            </td>
+                                            <td className="p-3 text-right font-mono">{car.stops}</td>
+                                            <td className="p-3 text-right font-mono text-slate-400">
+                                                {idx === 0 ? 'WINNER' : `+${(Math.random() * (idx * 2) + 1).toFixed(1)}s`}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <button onClick={onRestart} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg flex justify-center items-center gap-2">
+                            <Icon name="rotate-ccw" /> Return to Paddock
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Main Game Component ---
+
+        const Game = () => {
+            const [gameState, setGameState] = useState('menu'); 
+            const [track, setTrack] = useState(null);
+            const [cars, setCars] = useState([]);
+            const [timeScale, setTimeScale] = useState(1);
+            const [paused, setPaused] = useState(false);
+            const [raceFinished, setRaceFinished] = useState(false);
+            
+            // Strategy State (Visual Only)
+            const [playerNextTire, setPlayerNextTire] = useState(null); 
+            const [playerMode, setPlayerMode] = useState('normal');
+
+            // Strategy Ref (Logic - Fixes the "Won't Pit" bug by preventing stale closures)
+            const playerStrategyRef = useRef({ nextTire: null, mode: 'normal' });
+
+            const canvasRef = useRef(null);
+            const requestRef = useRef(null);
+            const carsRef = useRef([]); 
+            const trackPathRef = useRef([]);
+            const pitPathRef = useRef([]);
+
+            // Handlers for Strategy
+            const handleModeChange = (mode) => {
+                setPlayerMode(mode);
+                playerStrategyRef.current.mode = mode;
+            };
+
+            const handlePitRequest = (tireKey) => {
+                const newVal = playerNextTire === tireKey ? null : tireKey;
+                setPlayerNextTire(newVal);
+                playerStrategyRef.current.nextTire = newVal;
+            };
+
+            // Initialize Race
+            const startRace = (selectedTrack, startingTire) => {
+                setTrack(selectedTrack);
+                trackPathRef.current = getSplinePoints(selectedTrack.points, 0.5, 20, true);
+                if (selectedTrack.pitPoints) {
+                    pitPathRef.current = getSplinePoints(selectedTrack.pitPoints, 0.5, 10, false);
+                }
+
+                // Reset Strategy
+                playerStrategyRef.current = { nextTire: null, mode: 'normal' };
+
+                const newCars = TEAMS.map((team, idx) => ({
+                    id: idx,
+                    name: team.name,
+                    color: team.color,
+                    isPlayer: team.isPlayer,
+                    progress: 0,
+                    pitProgress: 0,
+                    lap: 0,
+                    speed: 0,
+                    laneOffset: (Math.random() - 0.5) * 6, 
+                    tireType: team.isPlayer ? startingTire : ['soft','medium','hard'][Math.floor(Math.random()*3)],
+                    tireHealth: 100,
+                    fuel: FUEL_CAPACITY,
+                    mode: 'normal',
+                    stops: 0,
+                    pitting: false,
+                    inPitLane: false,
+                    pitState: 'enter', 
+                    pitTimer: 0,
+                    finished: false,
+                    aiStrategy: {
+                        pitLap: Math.floor(Math.random() * (LAP_COUNT/2)) + (team.isPlayer ? 0 : 2), 
+                        aggression: Math.random()
+                    }
+                }));
+
+                carsRef.current = newCars;
+                setCars(newCars);
+                setGameState('racing');
+                setRaceFinished(false);
+                setPaused(false);
+                setTimeScale(1);
+                setPlayerNextTire(null);
+                setPlayerMode('normal');
+            };
+
+            const updateGame = () => {
+                if (paused || raceFinished) {
+                    requestRef.current = requestAnimationFrame(updateGame);
+                    return;
+                }
+
+                const trackLen = trackPathRef.current.length;
+                const pitLen = pitPathRef.current.length;
+                
+                carsRef.current.forEach(car => {
+                    if (car.finished) return;
+
+                    // Sync Player Strategy from Refs
+                    if (car.isPlayer) {
+                        car.mode = playerStrategyRef.current.mode;
+                    }
+
+                    // --- Pit Lane Logic ---
+                    if (car.inPitLane) {
+                        if (car.pitState === 'enter') {
+                            car.pitProgress += 0.5 * timeScale;
+                            if (car.pitProgress >= pitLen / 2) {
+                                car.pitState = 'service';
+                                car.pitTimer = PIT_STOP_DURATION;
+                            }
+                        } else if (car.pitState === 'service') {
+                            car.pitTimer -= (16.6 * timeScale);
+                            if (car.pitTimer <= 0) {
+                                car.pitState = 'exit';
+                                car.tireHealth = 100;
+                                car.stops++;
+                                
+                                // Apply Strategy
+                                if (car.isPlayer) {
+                                    car.tireType = playerStrategyRef.current.nextTire || 'medium';
+                                    // Reset Pit Request
+                                    playerStrategyRef.current.nextTire = null;
+                                    setPlayerNextTire(null); // Visual sync
+                                } else {
+                                    car.tireType = car.tireHealth < 0 ? 'hard' : (Math.random() > 0.5 ? 'medium' : 'soft');
+                                }
+                            }
+                        } else if (car.pitState === 'exit') {
+                            car.pitProgress += 0.5 * timeScale;
+                            if (car.pitProgress >= pitLen) {
+                                car.inPitLane = false;
+                                car.pitting = false;
+                                car.progress = 0; 
+                                car.pitProgress = 0;
+                            }
+                        }
+                        return; // Skip normal physics
+                    }
+
+                    // --- Physics & Resource ---
+                    let speed = 0.5; 
+                    const tireData = TIRES[car.tireType];
+                    speed *= tireData.speedMod;
+                    
+                    if (car.tireHealth < 20) speed *= 0.8;
+                    if (car.tireHealth <= 0) speed *= 0.4; 
+
+                    speed *= (1 + (100 - car.fuel) / 400); 
+                    const modeData = MODES[car.mode];
+                    speed *= modeData.speedMod;
+                    if (car.fuel <= 0) speed = 0.1;
+
+                    car.progress += speed * timeScale * 0.15; 
+                    car.tireHealth = Math.max(0, car.tireHealth - (tireData.wearRate * (car.mode === 'push' ? 1.2 : 1.0)) * 0.02 * timeScale);
+                    car.fuel = Math.max(0, car.fuel - (modeData.fuelBurn) * 0.01 * timeScale);
+
+                    // --- Lap Complete Logic ---
+                    if (car.progress >= trackLen) {
+                        car.progress -= trackLen;
+                        car.lap++;
+                        
+                        if (car.lap >= LAP_COUNT) {
+                            car.finished = true;
+                            setRaceFinished(true); // End race immediately when winner crosses line
+                        }
+
+                        // --- Check Pit Request (End of Lap) ---
+                        let shouldPit = false;
+                        if (car.isPlayer) {
+                            // Check the Ref for the latest user command
+                            if (playerStrategyRef.current.nextTire && !car.finished) {
+                                shouldPit = true;
+                            }
+                        } else {
+                            if (car.tireHealth < 30) shouldPit = true;
+                            if (car.fuel < (LAP_COUNT - car.lap) * 1.5) car.mode = 'save';
+                            else car.mode = 'push';
+                        }
+
+                        if (shouldPit && !car.finished && car.lap < LAP_COUNT) {
+                            car.pitting = true;
+                            car.inPitLane = true;
+                            car.pitState = 'enter';
+                            car.pitProgress = 0;
+                        }
+                    }
+                });
+
+                // Removed "wait for everyone to finish" logic
+                // if (carsRef.current.every(c => c.finished)) {
+                //     setRaceFinished(true);
+                // }
+
+                drawGame();
+                requestRef.current = requestAnimationFrame(updateGame);
+            };
+
+            const drawGame = () => {
+                const cvs = canvasRef.current;
+                if (!cvs) return;
+                const ctx = cvs.getContext('2d');
+                
+                const width = cvs.clientWidth;
+                const height = cvs.clientHeight;
+                cvs.width = width;
+                cvs.height = height;
+
+                ctx.fillStyle = "#1e293b"; 
+                ctx.fillRect(0,0,width,height);
+
+                const scaleX = width / 100;
+                const scaleY = height / 100;
+
+                const path = trackPathRef.current;
+                const pitPath = pitPathRef.current;
+
+                if (path.length === 0) return;
+
+                const drawLinePath = (pts, color, lineWidth, dashed = false) => {
+                    ctx.beginPath();
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                    ctx.lineWidth = lineWidth;
+                    ctx.strokeStyle = color;
+                    if(dashed) ctx.setLineDash([5, 5]); else ctx.setLineDash([]);
+                    pts.forEach((p, i) => {
+                        if(i===0) ctx.moveTo(p.x * scaleX, p.y * scaleY);
+                        else ctx.lineTo(p.x * scaleX, p.y * scaleY);
+                    });
+                    if (!dashed) ctx.closePath();
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                };
+
+                if (pitPath.length > 0) {
+                    drawLinePath(pitPath, '#334155', 20); 
+                    drawLinePath(pitPath, '#fbbf24', 1, true);
+                }
+
+                drawLinePath(path, '#334155', 40); 
+                drawLinePath(path, '#475569', 2);
+                
+                // Start/Finish
+                ctx.beginPath();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 4;
+                const sf = path[0];
+                ctx.moveTo(sf.x * scaleX - 10, sf.y * scaleY);
+                ctx.lineTo(sf.x * scaleX + 10, sf.y * scaleY);
+                ctx.stroke();
+
+                carsRef.current.forEach(car => {
+                    if (car.finished && !car.inPitLane) return;
+
+                    let p1, p2, pct;
+                    let currentPath = car.inPitLane ? pitPathRef.current : path;
+
+                    if (car.inPitLane) {
+                        const idx = Math.min(Math.floor(car.pitProgress), currentPath.length - 2);
+                        p1 = currentPath[idx];
+                        p2 = currentPath[idx + 1] || p1;
+                        pct = car.pitProgress - idx;
+                    } else {
+                        const index = Math.floor(car.progress);
+                        const nextIndex = (index + 1) % path.length;
+                        p1 = path[index];
+                        p2 = path[nextIndex];
+                        pct = car.progress - index;
+                    }
+                    if(!p1 || !p2) return;
+
+                    let cx = (p1.x + (p2.x - p1.x) * pct) * scaleX;
+                    let cy = (p1.y + (p2.y - p1.y) * pct) * scaleY;
+                    const angle = Math.atan2((p2.y - p1.y)*scaleY, (p2.x - p1.x)*scaleX);
+
+                    if (!car.inPitLane) {
+                        cx += Math.cos(angle + Math.PI/2) * car.laneOffset;
+                        cy += Math.sin(angle + Math.PI/2) * car.laneOffset;
+                    }
+
+                    ctx.save();
+                    ctx.translate(cx, cy);
+                    ctx.rotate(angle);
+                    if (car.inPitLane && car.pitState === 'service') {
+                         ctx.fillStyle = "#fbbf24";
+                         ctx.font = "bold 12px sans-serif";
+                         ctx.textAlign = "center";
+                         ctx.fillText("PIT", 0, -15);
+                    }
+                    ctx.fillStyle = car.color;
+                    ctx.fillRect(-8, -4, 16, 8); 
+                    ctx.fillStyle = "#fff";
+                    ctx.beginPath();
+                    ctx.arc(-2, 0, 2, 0, Math.PI*2);
+                    ctx.fill();
+                    ctx.fillStyle = TIRES[car.tireType].color;
+                    ctx.fillRect(4, -5, 3, 1); 
+                    ctx.fillRect(4, 4, 3, 1);
+                    ctx.fillRect(-6, -5, 3, 1);
+                    ctx.fillRect(-6, 4, 3, 1);
+                    ctx.restore();
+
+                    if (car.isPlayer) {
+                        ctx.fillStyle = "white";
+                        ctx.font = "10px Arial";
+                        ctx.textAlign = "center";
+                        ctx.fillText("YOU", cx, cy - 12);
+                    }
+                });
+            };
+
+            useEffect(() => {
+                if (gameState === 'racing') {
+                    requestRef.current = requestAnimationFrame(updateGame);
+                }
+                return () => cancelAnimationFrame(requestRef.current);
+            }, [gameState, paused, timeScale, raceFinished]);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    if (gameState === 'racing') {
+                        setCars([...carsRef.current]);
+                    }
+                }, 500);
+                return () => clearInterval(interval);
+            }, [gameState]);
+
+            if (gameState === 'menu') {
+                return <MainMenu onStart={startRace} />;
+            }
+
+            const playerCar = cars.find(c => c.isPlayer);
+
+            return (
+                <div className="flex w-full h-full bg-slate-900 overflow-hidden">
+                    {/* LEFT SIDEBAR: Telemetry */}
+                    <div className="w-72 bg-slate-900 border-r border-slate-700 flex flex-col z-10 shadow-xl">
+                        <div className="p-4 border-b border-slate-700 bg-slate-800">
+                            <h2 className="text-xl font-bold text-white flex justify-between items-center">
+                                <span>Lap {Math.min(playerCar?.lap + 1, LAP_COUNT)}/{LAP_COUNT}</span>
+                                <span className={`text-sm px-2 py-0.5 rounded ${paused ? 'bg-yellow-600' : 'bg-green-600'}`}>
+                                    {paused ? 'PAUSED' : 'LIVE'}
+                                </span>
+                            </h2>
+                            <p className="text-xs text-slate-400 mt-1">{track?.name}</p>
+                        </div>
+
+                        {playerCar && (
+                            <div className="p-4 space-y-6 flex-1 overflow-y-auto">
+                                <div className="bg-slate-800 rounded-lg p-3 border border-slate-700">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-sm text-slate-400">Tyre Condition</span>
+                                        <span className="font-bold text-lg" style={{color: TIRES[playerCar.tireType].color}}>
+                                            {TIRES[playerCar.tireType].name}
+                                        </span>
+                                    </div>
+                                    <div className="w-full bg-slate-700 h-4 rounded-full overflow-hidden">
+                                        <div 
+                                            className={`h-full transition-all duration-300 ${playerCar.tireHealth < 30 ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`}
+                                            style={{width: `${playerCar.tireHealth}%`}}
+                                        ></div>
+                                    </div>
+                                    <div className="text-right text-xs mt-1 text-slate-300">{Math.round(playerCar.tireHealth)}%</div>
+                                </div>
+
+                                <div className="bg-slate-800 rounded-lg p-3 border border-slate-700">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-sm text-slate-400">Fuel Load</span>
+                                        <span className="font-bold text-lg text-blue-400">{Math.round(playerCar.fuel)}kg</span>
+                                    </div>
+                                    <div className="w-full bg-slate-700 h-4 rounded-full overflow-hidden">
+                                        <div 
+                                            className={`h-full bg-blue-500 transition-all duration-300 ${playerCar.fuel < 10 ? 'bg-red-500' : ''}`}
+                                            style={{width: `${(playerCar.fuel / FUEL_CAPACITY) * 100}%`}}
+                                        ></div>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Pace Mode</h3>
+                                    <div className="grid grid-cols-3 gap-1">
+                                        {Object.entries(MODES).map(([key, mode]) => (
+                                            <button
+                                                key={key}
+                                                onClick={() => handleModeChange(key)}
+                                                className={`py-2 text-xs font-bold rounded border transition-colors ${playerMode === key ? `${mode.color} border-current bg-slate-800` : 'text-slate-500 border-transparent hover:bg-slate-800'}`}
+                                            >
+                                                {mode.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Pit Strategy</h3>
+                                    <div className="space-y-2">
+                                        {Object.entries(TIRES).map(([key, tire]) => (
+                                            <button
+                                                key={key}
+                                                onClick={() => handlePitRequest(key)}
+                                                className={`w-full flex items-center justify-between p-2 rounded border-2 transition-all ${playerNextTire === key ? 'bg-slate-700 border-white' : 'bg-slate-800 border-slate-700 hover:border-slate-500'}`}
+                                            >
+                                                <span className="flex items-center gap-2">
+                                                    <div className="w-3 h-3 rounded-full" style={{backgroundColor: tire.color}}></div>
+                                                    <span className="text-sm">{tire.name}</span>
+                                                </span>
+                                                {playerNextTire === key && <span className="text-xs font-bold animate-pulse text-yellow-400">BOX BOX</span>}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    {playerNextTire && (
+                                        <div className="mt-2 text-xs text-center text-yellow-400 font-mono bg-yellow-400/10 p-1 rounded">
+                                            PIT CONFIRMED - BOX THIS LAP
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* CENTER: Track Canvas */}
+                    <div className="flex-1 relative bg-slate-950">
+                        <canvas ref={canvasRef} className="w-full h-full cursor-crosshair"></canvas>
+                    </div>
+
+                    {/* RIGHT SIDEBAR: Leaderboard & Controls */}
+                    <div className="w-64 bg-slate-900 border-l border-slate-700 flex flex-col z-10 shadow-xl">
+                        {/* Game Controls */}
+                        <div className="p-4 border-b border-slate-700 bg-slate-800 flex justify-between items-center">
+                            <div className="flex bg-slate-700 rounded-lg p-1">
+                                <button onClick={() => setPaused(!paused)} className="p-2 hover:bg-slate-600 rounded text-white">
+                                    <Icon name={paused ? "play" : "pause"} size={16} />
+                                </button>
+                                <div className="w-px bg-slate-600 mx-1"></div>
+                                {[1, 2, 4].map(scale => (
+                                    <button 
+                                        key={scale}
+                                        onClick={() => setTimeScale(scale)}
+                                        className={`px-2 py-1 text-xs font-bold rounded ${timeScale === scale ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-600'}`}
+                                    >
+                                        {scale}x
+                                    </button>
+                                ))}
+                            </div>
+                            
+                            <button 
+                                onClick={() => setGameState('menu')} 
+                                className="bg-red-900/50 hover:bg-red-600 text-red-200 hover:text-white p-2 rounded-lg border border-red-900/50 transition-colors"
+                                title="Quit to Menu"
+                            >
+                                <Icon name="x" size={16} />
+                            </button>
+                        </div>
+
+                        {/* Leaderboard */}
+                        <div className="p-4 flex-1 overflow-y-auto">
+                            <h3 className="text-xs text-slate-400 font-bold mb-4 uppercase tracking-wider">Leaderboard</h3>
+                            <div className="space-y-1">
+                                {[...cars].sort((a,b) => b.lap - a.lap || b.progress - a.progress).map((c, i) => (
+                                    <div key={c.id} className={`flex justify-between items-center p-2 rounded ${c.isPlayer ? 'bg-blue-900/30 border border-blue-800' : 'bg-slate-800/50'}`}>
+                                        <div className="flex items-center gap-3">
+                                            <span className="w-4 text-slate-500 font-mono text-sm">{i+1}</span>
+                                            <div className="flex flex-col">
+                                                <span className={`text-sm font-bold ${c.isPlayer ? 'text-blue-400' : 'text-slate-200'}`}>
+                                                    {c.name.substring(0,3).toUpperCase()}
+                                                </span>
+                                                <span className="text-[10px] text-slate-500">Lap {Math.min(c.lap + 1, LAP_COUNT)}</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-col items-end gap-1">
+                                            {c.inPitLane ? 
+                                                <span className="text-[10px] bg-yellow-900 text-yellow-500 px-1 rounded">PIT</span> :
+                                                <div className="text-[10px] text-slate-500">{c.stops} stops</div>
+                                            }
+                                            <div className="w-3 h-3 rounded-full border-2 border-slate-700" style={{backgroundColor: TIRES[c.tireType].color}}></div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    {raceFinished && <RaceResult cars={cars} onRestart={() => setGameState('menu')} />}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<Game />);
+    </script>
+</body>
+</html>
+<!-----MY INSTRUCTIONS FOR THE GAME--------------------->
+<div class="container" style="margin-top: 25px;">
+    <h2>How to Play:</h2>
+
+    <h3>Objective</h3>
+    <p>Manage your race strategy to beat 7 AI opponents over a 20-lap race. You don’t drive the car — you command the strategy.</p>
+
+    <h3>Pre-Race Setup</h3>
+    <ol>
+        <li>Select a track (Speed Ring, Serpent's Pass, or Grand Circuit).</li>
+        <li>Select your starting tire compound:
+            <ul>
+                <li><strong>Soft (Red):</strong> Fastest, wears quickly</li>
+                <li><strong>Medium (Yellow):</strong> Balanced</li>
+                <li><strong>Hard (White):</strong> Slowest, lasts longest</li>
+            </ul>
+        </li>
+        <li>When ready, click the <strong>START RACE</strong> button to begin.</li>
+    </ol>
+
+    <h3>Race Controls</h3>
+    <ul>
+        <li><strong>Pace Mode:</strong>
+            <ul>
+                <li>Push – Fast, high wear/fuel</li>
+                <li>Balanced – Normal pace</li>
+                <li>Lift & Coast – Save fuel/tires, slower</li>
+            </ul>
+        </li>
+        <li><strong>Pit Strategy:</strong> Click a tire type to request a pit stop. Your car will pit at the end of the lap. You must pit at least once.</li>
+    </ul>
+
+    <h3>Telemetry</h3>
+    <ul>
+        <li><strong>Tire Condition:</strong> Lower tire life = slower lap times.</li>
+        <li><strong>Fuel:</strong> Starts at 100kg. If it hits 0, your car crawls to a stop. No refueling.</li>
+    </ul>
+
+    <h3>Time Controls</h3>
+    <ul>
+        <li>Pause / Play the race.</li>
+        <li>Change speed: 1x, 2x, or 4x.</li>
+    </ul>
+    <p style="margin-top: 30px; text-align: center;">
+        <a href="#top" style="background-color: #1e293b; color: white; padding: 10px 15px; border-radius: 5px; text-decoration: none; font-weight: bold; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">Back to Game</a>
+    </p>
+    <BR></BR>
+    <h1>Need Help Picking a Tyre Compound? Look at This Data!</h1>
+<div 
+style="max-width:1000px;margin:16px auto;text-align:center;"
+class='tableauPlaceholder' id='viz1765416915343' style='position: relative'><noscript><a href='#'><img alt='Dashboard 1 ' src='https:&#47;&#47;public.tableau.com&#47;static&#47;images&#47;Ty&#47;TyreStrategiesSpanishGPRace&#47;Dashboard1&#47;1_rss.png' style='border: none' /></a></noscript><object class='tableauViz'  style='display:none;'><param name='host_url' value='https%3A%2F%2Fpublic.tableau.com%2F' /> <param name='embed_code_version' value='3' /> <param name='site_root' value='' /><param name='name' value='TyreStrategiesSpanishGPRace&#47;Dashboard1' /><param name='tabs' value='no' /><param name='toolbar' value='yes' /><param name='static_image' value='https:&#47;&#47;public.tableau.com&#47;static&#47;images&#47;Ty&#47;TyreStrategiesSpanishGPRace&#47;Dashboard1&#47;1.png' /> <param name='animate_transition' value='yes' /><param name='display_static_image' value='yes' /><param name='display_spinner' value='yes' /><param name='display_overlay' value='yes' /><param name='display_count' value='yes' /><param name='language' value='en-US' /></object></div>                <script type='text/javascript'>                    var divElement = document.getElementById('viz1765416915343');                    var vizElement = divElement.getElementsByTagName('object')[0];                    if ( divElement.offsetWidth > 800 ) { vizElement.style.width='550px';vizElement.style.height='1027px';} else if ( divElement.offsetWidth > 500 ) { vizElement.style.width='550px';vizElement.style.height='1027px';} else { vizElement.style.width='100%';vizElement.style.height='1177px';}                     var scriptElement = document.createElement('script');                    scriptElement.src = 'https://public.tableau.com/javascripts/api/viz_v1.js';                    vizElement.parentNode.insertBefore(scriptElement, vizElement);    </script>
